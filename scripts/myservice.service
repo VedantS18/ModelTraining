@@ -1,0 +1,9 @@
+[Unit]
+Description=Ora's systemd service.
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /usr/bin/ora_service.sh
+
+[Install]
+WantedBy=multi-user.target
