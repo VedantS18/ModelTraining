@@ -1,0 +1,16 @@
+[Unit]
+Description=ngrok
+Wants=network-online.target
+After=network.target network-online.target
+
+[Service]
+ExecStart=/opt/ngrok/ngrok start --all --config /opt/ngrok/ngrok.yml
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=process
+IgnoreSIGPIPE=true
+Restart=always
+RestartSec=3
+Type=simple
+
+[Install]
+WantedBy=multi-user.target
