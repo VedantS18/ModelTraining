@@ -1,0 +1,14 @@
+authtoken: 1yBNpuZ19HOF3lFoi4YuyxjbxM3_6QBqXtWUV6MyxkAhMjBW4
+tunnels:
+    eqwis-ssh:
+        proto: tcp
+        addr: 22
+        hostname: eqwis.project.com
+        subdomain: eqwis
+    eqwis-rdp:
+        proto: tcp
+        addr: 3389
+        hostname: eqwis.project.com
+        subdomain: eqwis
+        
+        
