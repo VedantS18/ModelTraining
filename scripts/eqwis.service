@@ -1,0 +1,12 @@
+[Unit]
+Description=Eqwis systemd service.
+Requires=networking.service
+After=networking.service
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sleep 120
+ExecStart=/home/vedant/projects/eqwis-tools/scripts/rundocker.sh
+
+[Install]
+WantedBy=multi-user.target
