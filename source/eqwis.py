@@ -14,29 +14,26 @@ class ObjectDetection:
     """
 
     def __init__(self, rtsp):
-        """
-        Initializes the class with youtube url and output file.
-        :param url: Has to be as youtube URL,on which prediction is made.
-        :param out_file: A valid output file name.
-        """
+
+        now = datetime.now()
         self.last_detection_time = None
-        self.output_path = "./output/"
+        self.datepath = now.strftime("%d_%m_%y")
+        self.output_path = "/yolov5/standard/output/" + self.datepath + "/"
         self.detection_window_threshold = 5
         self._RTSP = rtsp
         self.model = self.load_model()
         self.classes = self.model.names
-        self.out_file = out_file
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.writer = None
         self.file = None
         #metadata file
-        self.csv_file_path = "./output/metadata.csv"
+        self.csv_file_path = self.output_path + "metadata.csv"
 
         print(self.device)
 
         #categories to look for
         self.categories = ["sheep", "horse", "cow", "dog", "person"]
-        self.confidence_threshold = 0.2
+        self.confidence_threshold = 0.5
 
     def open_metadata_file(self) :        
         #create the required directory structure
@@ -75,7 +72,6 @@ class ObjectDetection:
         frame = [frame]
         results = self.model(frame)
         labels, cord = results.xyxyn[0][:, -1].cpu().detach().numpy(), results.xyxyn[0][:, :-1].cpu().detach().numpy()
-        print(labels)
         return labels, cord
 
     def class_to_label(self, x):
@@ -98,11 +94,12 @@ class ObjectDetection:
         x_shape, y_shape = frame.shape[1], frame.shape[0]
         for i in range(n):
             row = cord[i]
+            conf = cord[i][4]
             if row[4] >= 0.2:
                 x1, y1, x2, y2 = int(row[0]*x_shape), int(row[1]*y_shape), int(row[2]*x_shape), int(row[3]*y_shape)
                 bgr = (0, 255, 0)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), bgr, 2)
-                cv2.putText(frame, self.class_to_label(labels[i]), (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.9, bgr, 2)
+                cv2.putText(frame, self.class_to_label(labels[i]) + str(conf), (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.9, bgr, 2)
 
         return frame
 
@@ -192,6 +189,7 @@ class ObjectDetection:
 
                     if (found_classes_of_interest and detection_window_met):
                         self.register_write_detections(results, frame)
+                        print("Found classes of interest")
                 prev = time()
             k = cv2.waitKey(1)
             if k == 0xFF & ord("q"):
