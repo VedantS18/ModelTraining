@@ -19,6 +19,7 @@ class ObjectDetection:
         now = datetime.now()
         self.last_detection_time = None
         self.datepath = now.strftime("%d_%m_%y")
+        self.baseline_path = "/yolov5/baseline/" + self.datepath + "/"
         self.output_path = "/yolov5/output/" + self.datepath + "/"
         self.detection_window_threshold = 5
         self._RTSP = rtsp
@@ -38,10 +39,20 @@ class ObjectDetection:
         self.categories = ["sheep", "horse", "cow", "dog", "person"]
         self.confidence_threshold = 0.5
 
+        # cv2a.videoio_registry.getBackends() returns list of all available backends.
+        availableBackends = [cv2.videoio_registry.getBackendName(b) for b in cv2.videoio_registry.getBackends()]
+        print(availableBackends)
+
+
+
     def open_metadata_file(self) :        
         #create the required directory structure
         if (os.path.isdir(self.output_path) == False):
             os.mkdir(self.output_path)
+
+        if (os.path.isdir(self.baseline_path) == False):
+            os.mkdir(self.baseline_path)
+
         if(os.path.isfile(self.csv_file_path) == True):
             with open(self.csv_file_path, 'a', newline = '') as self.file:
                 self.writer = csv.writer(self.file)
@@ -55,7 +66,9 @@ class ObjectDetection:
         Creates a new video streaming object to extract video frame by frame to make prediction on.
         :return: opencv2 video capture object, with lowest quality frame available for video.
         """   
-        return cv2.VideoCapture(self._RTSP)   
+        cap = cv2.VideoCapture(self._RTSP, cv2.CAP_FFMPEG)   
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'H264'))
+        return cap
          
     def get_video_from_thermal(self):
         return cv2.VideoCapture(self._RTSP_t)  
@@ -66,6 +79,7 @@ class ObjectDetection:
         Loads Yolo5 model from pytorch hub.
         :return: Trained Pytorch model.
         """
+        #model = None
         model = torch.hub.load('./', 'custom', './yolov5s.pt', source = 'local', force_reload=True)
         return model
 
@@ -149,7 +163,7 @@ class ObjectDetection:
                     self.writer.writerow([dt_string, _originalImagePath, _annotatedImagePath, _confidence])
             self.file.close()
 
-    def register_write_detections(self, _results, _frame) :
+    def register_write_detections(self, _results, _frame, _filename, _subscript) :
         labels, cord = _results
         n = len(labels)
         for i in range(n):
@@ -158,70 +172,95 @@ class ObjectDetection:
             if confidence >= self.confidence_threshold and (label in self.categories):
                 original_frame = _frame.copy()
                 _frame = self.plot_boxes(_results, _frame)
-                filename = str(int(time()))
-                detectionsImagePath = self.output_path + filename + "_yolov5.jpg"
-                originalImagePath = self.output_path + filename + "_raw.jpg"
+                detectionsImagePath = self.output_path + _filename + _subscript + "_yolov5.jpg"
+                originalImagePath = self.output_path + _filename + _subscript + "_raw.jpg"
                 cv2.imwrite(originalImagePath, original_frame)
                 cv2.imwrite(detectionsImagePath, _frame)
                 self.update_metadata_file(originalImagePath, detectionsImagePath, confidence, label)
 
+    def register_baseline_frame(self, _frame, _filename, _subscript):
+        baselineImagePath = self.output_path + _filename + _subscript + "_baseline.jpg"
+        cv2.imwrite(baselineImagePath, _frame)
+
     def receive_frames(self):
-        frame_rate = 0.5
+        frame_rate = 1.0
         player_o = self.get_video_from_optical()
         player_t = self.get_video_from_thermal()
         assert player_o.isOpened()
         assert player_t.isOpened()
         prev = time()
         while True:
+            assert player_o.isOpened()
+            assert player_t.isOpened()
             start_time = time()
             time_elapsed = start_time - prev
-            ret, frame = player_o.read()
+            ret_o, frame_o = player_o.read()
+            ret_t, frame_t = player_t.read()
             if time_elapsed > 1./frame_rate:
-                if ret:
-                    print("Queueing Frame")
-                    self.optical_q.put(frame)
-                    self.thermal_q.put(frame)
+                print("Time Qualified")
+                print(ret_o)
+                print(ret_t)       
+                if ret_o and self.optical_q.empty():
+                    print("Queueing O Frames")
+                    self.optical_q.put(frame_o)
+                else :
+                    player_o.release();
+                    player_o = self.get_video_from_optical()
+                if ret_t and self.thermal_q.empty():
+                    print("Queueing T Frames")
+                    self.thermal_q.put(frame_t)
+                else :
+                    player_t.release();
+                    player_t = self.get_video_from_thermal()
+                if ret_o or ret_t :
                     end_time = time()
-                    fps = 1. / np.round(end_time - start_time, 3)
-                    
-
+                    prev = end_time
                     
     def process_optical(self):
-
+        drop_time = 30.0 #every 30 seconds
+        prev_drop_time = time()
         while True:
             #check for detection of horses and set the flag save the metadata
             foundClasses = False;
             if self.optical_q.empty() != True:
                 frame = self.optical_q.get()
-                print("Processing Frame")
-                
+                print("Processing O Frame")
+                filename = str(int(time()))
                 results = self.score_frame(frame)
 
+                if (time() - prev_drop_time > drop_time):
+                    self.register_baseline_frame(frame, filename,"_o")
+                    prev_drop_time = time()
 
                 found_classes_of_interest = self.check_interest_categories(results)
                 detection_window_met = self.detection_window_passed()
 
                 if (found_classes_of_interest and detection_window_met):
-                    self.register_write_detections(results, frame)
+                    self.register_write_detections(results, frame, filename, "_o")
                     print("Found classes of interest")
     
     def process_thermal(self):
-
+        drop_time = 30.0 #every 30 seconds
+        prev_drop_time = time()
         while True:
             #check for detection of horses and set the flag save the metadata
             foundClasses = False;
             if self.thermal_q.empty() != True:
                 frame = self.thermal_q.get()
-                print("Processing Frame")
-                
+                print("Processing T Frame")
+                filename = str(int(time()))                
                 results = self.score_frame(frame)
+
+                if (time() - prev_drop_time > drop_time):
+                    self.register_baseline_frame(frame, filename,"_t")
+                    prev_drop_time = time()
 
 
                 found_classes_of_interest = self.check_interest_categories(results)
                 detection_window_met = self.detection_window_passed()
 
                 if (found_classes_of_interest and detection_window_met):
-                    self.register_write_detections(results, frame)
+                    self.register_write_detections(results, frame, filename, "_t")
                     print("Found classes of interest")
            
                            
@@ -241,11 +280,5 @@ class ObjectDetection:
         p4 = threading.Thread(target=self.process_thermal)
         p4.start()
 
-            #k = cv2.waitKey(1)
-            #if k == 0xFF & ord("q"):
-                #break
-
-# Create a new object and execute.
-#a = ObjectDetection('rtsp://admin:M*ttapalli8*@191.168.86.6/unicast/c1/s0/live')
 a = ObjectDetection('rtsp://admin:Eqwis1234@192.168.1.64/Streaming/Channels/101', 'rtsp://admin:Eqwis1234@192.168.1.64/Streaming/Channels/201')
 a()
