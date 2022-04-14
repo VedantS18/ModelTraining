@@ -19,13 +19,13 @@ class ObjectDetection:
         now = datetime.now()
         self.last_detection_time = None
         self.datepath = now.strftime("%d_%m_%y")
-        self.baseline_path = "/yolov5/baseline/" + self.datepath + "/"
         self.output_path = "/yolov5/output/" + self.datepath + "/"
         self.detection_window_threshold = 5
         self._RTSP = rtsp
         self._RTSP_t = rtsp_t
-        self.model = self.load_model()
-        self.classes = self.model.names
+        self.model_o, self.model_t = self.load_models()
+        self.classes_o = self.model_o.names
+        self.classes_t = self.model_t.names
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.writer = None
         self.file = None
@@ -50,9 +50,6 @@ class ObjectDetection:
         if (os.path.isdir(self.output_path) == False):
             os.mkdir(self.output_path)
 
-        if (os.path.isdir(self.baseline_path) == False):
-            os.mkdir(self.baseline_path)
-
         if(os.path.isfile(self.csv_file_path) == True):
             with open(self.csv_file_path, 'a', newline = '') as self.file:
                 self.writer = csv.writer(self.file)
@@ -71,39 +68,59 @@ class ObjectDetection:
         return cap
          
     def get_video_from_thermal(self):
-        return cv2.VideoCapture(self._RTSP_t)  
+        cap = cv2.VideoCapture(self._RTSP_t, cv2.CAP_FFMPEG)   
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'H264'))
+        return cap  
     
     
-    def load_model(self): 
+    def load_models(self): 
         """
         Loads Yolo5 model from pytorch hub.
         :return: Trained Pytorch model.
         """
         #model = None
-        model = torch.hub.load('./', 'custom', './yolov5s.pt', source = 'local', force_reload=True)
-        return model
+        model_o = torch.hub.load('./', 'custom', './yolov5s.pt', source = 'local', force_reload=True)
+        model_t = torch.hub.load('./', 'custom', './yolov5s.pt', source = 'local', force_reload=True)
+        return (model_o, model_t)
 
-    def score_frame(self, frame):
+    def score_optical_frame(self, frame):
         """
         Takes a single frame as input, and scores the frame using yolo5 model.
         :param frame: input frame in numpy/list/tuple format.
         :return: Labels and Coordinates of objects detected by model in the frame.
         """
-        self.model.to(self.device)
+        self.model_o.to(self.device)
         frame = [frame]
-        results = self.model(frame)
+        results = self.model_o(frame)
         labels, cord = results.xyxyn[0][:, -1].cpu().detach().numpy(), results.xyxyn[0][:, :-1].cpu().detach().numpy()
         return labels, cord
 
-    def class_to_label(self, x):
+    def score_thermal_frame(self, frame):
+        """
+        Takes a single frame as input, and scores the frame using yolo5 model.
+        :param frame: input frame in numpy/list/tuple format.
+        :return: Labels and Coordinates of objects detected by model in the frame.
+        """
+        self.model_t.to(self.device)
+        frame = [frame]
+        results = self.model_t(frame)
+        labels, cord = results.xyxyn[0][:, -1].cpu().detach().numpy(), results.xyxyn[0][:, :-1].cpu().detach().numpy()
+        return labels, cord
+
+    def class_to_label(self, x, subscript):
         """
         For a given label value, return corresponding string label.
         :param x: numeric label
         :return: corresponding string label
         """
-        return self.classes[int(x)]
+        _class = None
+        if (subscript == "_o"):
+            _class = self.classes_o[int(x)]
+        elif (subscript == "_t"):
+            _class = self.classes_t[int(x)]
+        return _class
 
-    def plot_boxes(self, _results, frame):
+    def plot_boxes(self, _results, frame, subscript):
         """
         Takes a frame and its results as input, and plots the bounding boxes and label on to the frame.
         :param results: contains labels and coordinates predicted by model on the given frame.
@@ -116,11 +133,11 @@ class ObjectDetection:
         for i in range(n):
             row = cord[i]
             conf = cord[i][4]
-            if row[4] >= 0.2:
+            if row[4] >= 0.4:
                 x1, y1, x2, y2 = int(row[0]*x_shape), int(row[1]*y_shape), int(row[2]*x_shape), int(row[3]*y_shape)
                 bgr = (0, 255, 0)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), bgr, 2)
-                cv2.putText(frame, self.class_to_label(labels[i]) + str(conf), (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, bgr, 2)
+                cv2.putText(frame, self.class_to_label(labels[i], subscript) + str(conf), (x1, y1-5), cv2.FONT_HERSHEY_SIMPLEX, 0.9, bgr, 2)
 
         return frame
 
@@ -134,13 +151,13 @@ class ObjectDetection:
             return True
         return False
 
-    def check_interest_categories(self, _results) :
+    def check_interest_categories(self, _results, _subscript) :
         labels, cord = _results
         n = len(labels)
         for i in range(n):
             row = cord[i]
             if row[4] >= self.confidence_threshold:
-                label = self.class_to_label(labels[i])
+                label = self.class_to_label(labels[i], _subscript)
                 if (label in self.categories) :
                     return True
         return False
@@ -168,10 +185,10 @@ class ObjectDetection:
         n = len(labels)
         for i in range(n):
             confidence = cord[i][4]
-            label = self.class_to_label(labels[i])
+            label = self.class_to_label(labels[i], _subscript)
             if confidence >= self.confidence_threshold and (label in self.categories):
                 original_frame = _frame.copy()
-                _frame = self.plot_boxes(_results, _frame)
+                _frame = self.plot_boxes(_results, _frame, _subscript)
                 detectionsImagePath = self.output_path + _filename + _subscript + "_yolov5.jpg"
                 originalImagePath = self.output_path + _filename + _subscript + "_raw.jpg"
                 cv2.imwrite(originalImagePath, original_frame)
@@ -226,18 +243,17 @@ class ObjectDetection:
                 frame = self.optical_q.get()
                 print("Processing O Frame")
                 filename = str(int(time()))
-                results = self.score_frame(frame)
-
-                if (time() - prev_drop_time > drop_time):
-                    self.register_baseline_frame(frame, filename,"_o")
-                    prev_drop_time = time()
-
-                found_classes_of_interest = self.check_interest_categories(results)
+                results = self.score_optical_frame(frame)
+                found_classes_of_interest = self.check_interest_categories(results, "_o")
                 detection_window_met = self.detection_window_passed()
 
                 if (found_classes_of_interest and detection_window_met):
                     self.register_write_detections(results, frame, filename, "_o")
+                    self.register_baseline_frame(frame, filename,"_o")
                     print("Found classes of interest")
+                elif (time() - prev_drop_time > drop_time):
+                    self.register_baseline_frame(frame, filename,"_o")
+                    prev_drop_time = time()
     
     def process_thermal(self):
         drop_time = 30.0 #every 30 seconds
@@ -249,19 +265,17 @@ class ObjectDetection:
                 frame = self.thermal_q.get()
                 print("Processing T Frame")
                 filename = str(int(time()))                
-                results = self.score_frame(frame)
-
-                if (time() - prev_drop_time > drop_time):
-                    self.register_baseline_frame(frame, filename,"_t")
-                    prev_drop_time = time()
-
-
-                found_classes_of_interest = self.check_interest_categories(results)
+                results = self.score_thermal_frame(frame)
+                found_classes_of_interest = self.check_interest_categories(results, "_t")
                 detection_window_met = self.detection_window_passed()
 
                 if (found_classes_of_interest and detection_window_met):
                     self.register_write_detections(results, frame, filename, "_t")
+                    self.register_baseline_frame(frame, filename,"_t")
                     print("Found classes of interest")
+                elif (time() - prev_drop_time > drop_time):
+                    self.register_baseline_frame(frame, filename,"_t")
+                    prev_drop_time = time()
            
                            
                     
