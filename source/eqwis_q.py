@@ -80,7 +80,7 @@ class ObjectDetection:
         """
         #model = None
         model_o = torch.hub.load('./', 'custom', './yolov5s.pt', source = 'local', force_reload=True)
-        model_t = torch.hub.load('./', 'custom', './yolov5s.pt', source = 'local', force_reload=True)
+        model_t = torch.hub.load('./', 'custom', './yolov5st.pt', source = 'local', force_reload=True)
         return (model_o, model_t)
 
     def score_optical_frame(self, frame):
@@ -196,7 +196,7 @@ class ObjectDetection:
                 self.update_metadata_file(originalImagePath, detectionsImagePath, confidence, label)
 
     def register_baseline_frame(self, _frame, _filename, _subscript):
-        baselineImagePath = self.output_path + _filename + _subscript + "_baseline.jpg"
+        baselineImagePath = self.output_path + _filename + _subscript + "_raw.jpg"
         cv2.imwrite(baselineImagePath, _frame)
 
     def receive_frames(self):
@@ -220,13 +220,13 @@ class ObjectDetection:
                 if ret_o and self.optical_q.empty():
                     print("Queueing O Frames")
                     self.optical_q.put(frame_o)
-                else :
+                elif (ret_o != True) :
                     player_o.release();
                     player_o = self.get_video_from_optical()
                 if ret_t and self.thermal_q.empty():
                     print("Queueing T Frames")
                     self.thermal_q.put(frame_t)
-                else :
+                elif (ret_t != True) :
                     player_t.release();
                     player_t = self.get_video_from_thermal()
                 if ret_o or ret_t :
@@ -234,7 +234,7 @@ class ObjectDetection:
                     prev = end_time
                     
     def process_optical(self):
-        drop_time = 30.0 #every 30 seconds
+        drop_time = 300.0 #every 5 minutes
         prev_drop_time = time()
         while True:
             #check for detection of horses and set the flag save the metadata
@@ -249,14 +249,13 @@ class ObjectDetection:
 
                 if (found_classes_of_interest and detection_window_met):
                     self.register_write_detections(results, frame, filename, "_o")
-                    self.register_baseline_frame(frame, filename,"_o")
                     print("Found classes of interest")
                 elif (time() - prev_drop_time > drop_time):
                     self.register_baseline_frame(frame, filename,"_o")
                     prev_drop_time = time()
     
     def process_thermal(self):
-        drop_time = 30.0 #every 30 seconds
+        drop_time = 300.0 #every five minutes
         prev_drop_time = time()
         while True:
             #check for detection of horses and set the flag save the metadata
@@ -271,14 +270,10 @@ class ObjectDetection:
 
                 if (found_classes_of_interest and detection_window_met):
                     self.register_write_detections(results, frame, filename, "_t")
-                    self.register_baseline_frame(frame, filename,"_t")
                     print("Found classes of interest")
                 elif (time() - prev_drop_time > drop_time):
                     self.register_baseline_frame(frame, filename,"_t")
                     prev_drop_time = time()
-           
-                           
-                    
     
     def __call__(self):
         """
