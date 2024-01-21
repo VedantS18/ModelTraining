@@ -7,7 +7,7 @@ After=networking.service
 Type=simple
 TimeoutSec=300
 ExecStartPre=/bin/sleep 60
-ExecStart=/usr/bin/docker run --net=host --gpus all -v /home/vedant/.nv:/root/.nv -v /home/vedant/projects/docker_yolov5/:/yolov5 -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix vedantsrinivas/eqwis:jetson_nano python3 yolov5/standard/eqwis.py
+ExecStart=/usr/bin/docker run --net=host --gpus all -v /home/eqwis/.nv:/root/.nv -v /home/eqwis/.config:/root/.config -v /home/eqwis/Projects/yolov5/:/yolov5 -e LC_CTYPE='en_US.UTF-8' -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix  -w /yolov5 vedantsrinivas/florida:latest python3 eqwis_q.py
 
 Restart=always
 
